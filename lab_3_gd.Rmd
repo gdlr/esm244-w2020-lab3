@@ -1,0 +1,160 @@
+---
+title: "Lab 3"
+author: "Gabriel De La Rosa"
+date: "1/23/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE,
+                      warning = FALSE)
+
+library(tidyverse)
+library(janitor)
+library(sf)
+library(here)
+library(tmap)
+
+```
+
+
+## Binary Logistic Regression: Penguins!
+
+
+Read in the data:
+
+```{r cleaning}
+
+chinstrap <- read_csv(here("chinstrap_lter.csv")) %>% 
+  clean_names()
+
+gentoo <- read_csv(here("gentoo_lter.csv")) %>% 
+  clean_names()
+
+penguins <- full_join(chinstrap, gentoo) %>% 
+  mutate(sex = str_to_lower(sex)) %>% 
+  filter(sex %in% c("male", "female")) # filter(sex == "male" | sex == "female)
+
+```
+
+Now, let's graph this:
+
+Caveats: this only works in situations where the oucome variable options are ONLY chinstrap or gentoo penguins
+
+```{r}
+ggplot(data = penguins, aes(x = sex, y = body_mass_g)) +
+  geom_jitter(
+    aes(color = sex,
+        pch = sex)
+  ) +
+  facet_wrap(~species)
+```
+
+The easy way to pick which things are (0, 1) are to manually code them.
+
+Let's make Chinstrap penguins as (1) and Gentoo penguins as (0)
+
+You could do this with an if...else statement, but we can do the same with `case_when()`. Make sure you use a tilde at the end of this...
+
+Also, you can add an ...else statemet with (T ~ "cool (eg...)) in the case_when
+
+```{r}
+penguin_bin <- penguins %>% 
+  mutate(
+    sp_binary = case_when(
+      species == "Chinstrap penguin (Pygoscelis antarctica)" ~ 1,
+      species == "Gentoo penguin (Pygoscelis papua)" ~ 0
+    )
+  )
+```
+
+Now, let's run our binary logistic regression:
+
+use `glm()` for a generalized linear model, and indicate binomial by family = binomial argument.
+
+```{r}
+
+penguin_blr <- glm(sp_binary ~ sex + body_mass_g, 
+                   data = penguin_bin, 
+                   family = binomial)
+
+summary(penguin_blr)
+
+```
+
+This output gives coefficients in terms of log(odds). So, let's make some predictions for penguins(classification...kinda)
+
+1. What is the probability that a penguin is a Chinstrap penguin if it weighs 4500 g and is male?
+
+```{r}
+df_m4500 <- data.frame(sex = "male", body_mass_g = 4500)
+
+# Find the log odds of this penguin being Chinstrap...
+
+m4500_logodds <- predict(penguin_blr, newdata = df_m4500, type = "link")
+m4500_logodds
+
+#WTF does this mean...........let's convert this to actual probabilities using link = "response"
+
+m4500_prob <- predict(penguin_blr, newdata = df_m4500, type = "response")
+m4500_prob
+
+```
+So, based on these data, there's a 98.3% chance that a 4500 g male penguin is a Chinstrap!
+
+Okay, so what's the probability that a female, 4000 g penguin is a Chinstrap?
+
+```{r}
+
+df_4000 <- data.frame(sex = "female", body_mass_g = 4000)
+
+f4000_prob <- predict(penguin_blr, newdata = df_4000, type = "response")
+f4000_prob
+
+```
+
+Now, let's make an entire data frame & use it to make then visualize logistic regression outcomes:
+
+se.fit = TRUE gives you the standard error of the 
+
+```{r}
+penguins_mock <- data.frame(
+  body_mass_g = rep(seq(from = 3000, to = 6000, length = 300), 2),
+  sex = c(rep("male", 300), rep("female", 300))
+)
+
+full_predict <- predict(penguin_blr, newdata = penguins_mock, type = "response", se.fit = TRUE)
+
+# Get these into a df along with the mock data used to create them
+
+final_df <- data.frame(penguins_mock, 
+                       full_predict$fit,
+                       full_predict$se.fit)
+
+# How do we rename some of these annoying names? use colnames()
+
+colnames(final_df) <- c("penguin_mass", "sex", "probability", "se")
+  
+```
+
+Now, let's graph it!
+
+
+```{r}
+ggplot(data = final_df, 
+       aes(x = penguin_mass,
+           y = probability)) +
+  geom_line(aes(color = sex)) +
+  geom_ribbon(aes(ymin= probability - se, 
+                  ymax = probability + se,
+                  fill = sex),
+                  alpha = 0.3) +
+  theme_bw()
+```
+
+
+This sort of prediction based on a few input variables is exactly what machine learning does (minus a few steps). eg. training and validation.
+
+
+
